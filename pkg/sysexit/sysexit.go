@@ -8,7 +8,7 @@ import (
 )
 
 type SysExit struct {
-	Code  sysexits.ExitCode
+	Code  int
 	Error error
 }
 
@@ -20,6 +20,10 @@ func Handle() {
 		}
 		panic(e) // not an Exit, pass-through
 	}
+}
+
+func CreateNew(err error, code int) SysExit {
+	return SysExit{Code: code, Error: err}
 }
 
 func Unavailable(err error) SysExit {

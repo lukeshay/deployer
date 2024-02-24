@@ -1,0 +1,66 @@
+project_name: deployer
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    main: ./cmd/deployer
+
+archives:
+  - format: tar.gz
+    # this name template makes the OS and Arch compatible with the results of uname.
+    name_template: >-
+      deployer-
+      {{- if eq .Os "darwin" }}mac-
+      {{- else if eq .Os "windows" }}windows-
+      {{- else if eq .Os "linux" }}linux-{{end}}
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        format: zip
+checksum:
+  name_template: "checksums.txt"
+signs:
+  - artifacts: all
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+brews:
+  - repository:
+      owner: lukeshay
+      name: homebrew-tap
+    homepage: "https://github.com/lukeshay/deployer"
+    description: the deployer cli
+    license: Apache-2.0
+#fpms:
+# - maintainer: lukeshay
+#   description: the deployer cli
+#   formats:
+#     - deb
+#     - rpm
+#   file_name_template: >-
+#     {{ .ProjectName }}-
+#     {{- if eq .Os "darwin" }}mac
+#     {{- else }}{{ .Os }}{{ end }}-{{ .Arch }}
+#scoop:
+#  bucket:
+#    owner: lukeshay
+#   name: scoop-bucket
+# homepage: "https://github.com/lukeshay/deployer"
+# description: "deployer cli"
+# license: Apache 2.0
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
