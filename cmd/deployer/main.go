@@ -138,13 +138,13 @@ func main() {
 									labels := c.StringSlice("labels")
 									pull := c.String("pull")
 
-									repositoryUrl, err := url.Parse(repository)
+									repositoryUrl, err := url.Parse(fmt.Sprintf("https://%s", repository))
 									if err != nil {
 										slog.Error("Could not parse docker repository", "dockerRepository", repository, "error", err)
 										return cli.Exit(err, 1)
 									}
 
-									outFile := fmt.Sprintf(".deployer/artifacts/images/%s.tar", repository)
+									outFile := fmt.Sprintf(".deployer/artifacts/images/%s:%s.tar", repository, strings.Join(tags, ","))
 
 									if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 										slog.Error("Could not create directory", "outFile", outFile, "error", err)
@@ -155,7 +155,8 @@ func main() {
 										dag.
 											Container().
 											WithRegistryAuth(repositoryUrl.Host, username, password).
-											From(pull)
+											From(pull).
+											Export(c.Context, fmt.Sprintf(".deployer/artifacts/images/%s.tar", pull))
 									}
 
 									project := dag.Host().Directory(".")
