@@ -75,143 +75,112 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			{
-				Name:  "docker",
-				Usage: "run docker commands in Dagger",
+				Name:  "dagger",
+				Usage: "run commands in dagger",
 				Subcommands: []*cli.Command{
 					{
-						Name:  "build",
-						Usage: "build a Docker image",
-						Flags: []cli.Flag{
-							&cli.StringFlag{
-								Name:     "repository",
-								Aliases:  []string{"r", "repo"},
-								Usage:    "the github repository to clone: <owner>/<repo>",
-								Required: true,
-							},
-							&cli.StringFlag{
-								Name:     "ref",
-								Usage:    "the git ref to checkout",
-								Required: true,
-							},
-							&cli.StringSliceFlag{
-								Aliases: []string{"t"},
-								Name:    "tags",
-								Usage:   "the tags to apply to the image",
-								Value:   &cli.StringSlice{},
-							},
-							&cli.BoolFlag{
-								Aliases: []string{"p"},
-								Name:    "publish",
-								Usage:   "whether to publish the image",
-								Value:   false,
-							},
-							&cli.BoolFlag{
-								Name:    "is-local",
-								Aliases: []string{"l", "local"},
-								Usage:   "whether to use the local directory instead of cloning the repository",
-								Value:   false,
-							},
-							&cli.StringFlag{
-								Aliases: []string{"dr", "docker-repo"},
-								Name:    "docker-repository",
-								Usage:   "the repository to push the image to",
-							},
-							&cli.StringFlag{
-								Aliases:  []string{"du"},
-								Name:     "docker-username",
-								Usage:    "the username to authenticate with GHCR",
-								Required: true,
-								EnvVars:  []string{"GHCR_USERNAME", "DOCKER_USERNAME"},
-							},
-							&cli.StringFlag{
-								Aliases:  []string{"dp"},
-								Name:     "docker-password",
-								Usage:    "the password to authenticate with GHCR",
-								Required: true,
-								EnvVars:  []string{"GHCR_PASSWORD", "DOCKER_PASSWORD"},
-							},
-						},
-						Action: func(c *cli.Context) error {
-							ctx, dag, err := initializeDagger(c.Context)
-							if err != nil {
-								return cli.Exit(err, 1)
-							}
-
-							c.Context = ctx
-
-							repository := c.String("repository")
-							ref := c.String("ref")
-							tags := append(c.StringSlice("tags"), ref)
-							dockerRepository := flags.StringWithDefault(c, "docker-repository", fmt.Sprintf("ghcr.io/%s", repository))
-							dockerPassword := flags.StringAsSecret(c, dag, "docker-password")
-							dockerUserName := c.String("docker-username")
-							local := c.Bool("local")
-							publish := c.Bool("publish")
-
-							dockerRepositoryUrl, err := url.Parse(dockerRepository)
-							if err != nil {
-								slog.Error("Could not parse docker repository", "dockerRepository", dockerRepository, "error", err)
-								return cli.Exit(err, 1)
-							}
-
-							outFile := fmt.Sprintf(".deployer/artifacts/images/%s.tar", dockerRepository)
-
-							if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
-								slog.Error("Could not create directory", "outFile", outFile, "error", err)
-								return cli.Exit(err, 1)
-							}
-
-							var project *dagger.Directory
-
-							if local {
-								project = dag.Host().Directory(".")
-							} else {
-								project = dag.
-									Git(fmt.Sprintf("https://github.com/%s", repository)).
-									Branch(ref).
-									Tree()
-							}
-
-							image := project.
-								DockerBuild().
-								WithRegistryAuth(dockerRepositoryUrl.Host, dockerUserName, dockerPassword).
-								WithLabel("org.opencontainers.image.source", fmt.Sprintf("https://github.com/%s", repository)).
-								WithLabel("org.opencontainers.image.created", time.Now().Format(time.RFC3339)).
-								WithLabel("org.opencontainers.image.revision", ref)
-
-							_, err = image.Export(c.Context, outFile)
-							if err != nil {
-								return cli.Exit(err, 1)
-							}
-
-							fmt.Printf("Built image: %s\n", outFile)
-
-							if publish {
-								var result *multierror.Error
-
-								imageWithAuth := image.WithRegistryAuth(dockerRepositoryUrl.Host, dockerUserName, dockerPassword)
-
-								for _, tag := range tags {
-									addr, err := imageWithAuth.Publish(ctx, fmt.Sprintf(
-										"%s:%s",
-										dockerRepository,
-										tag,
-									), dagger.ContainerPublishOpts{
-										MediaTypes: dagger.Dockermediatypes,
-									})
+						Name:  "docker",
+						Usage: "run docker commands in Dagger",
+						Subcommands: []*cli.Command{
+							{
+								Name:  "build",
+								Usage: "build a Docker image",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:     "repository",
+										Usage:    "the repository to push the image to",
+										Required: true,
+									},
+									&cli.StringSliceFlag{
+										Name:  "tags",
+										Usage: "the tags to apply to the image",
+										Value: &cli.StringSlice{},
+									},
+									&cli.BoolFlag{
+										Name:  "publish",
+										Usage: "whether to publish the image",
+										Value: false,
+									},
+									&cli.StringFlag{
+										Name:    "username",
+										Usage:   "the username to authenticate with Docker",
+										EnvVars: []string{"DEPLOYER_DOCKER_USERNAME"},
+									},
+									&cli.StringFlag{
+										Name:    "password",
+										Usage:   "the password to authenticate with Docker",
+										EnvVars: []string{"DEPLOYER_DOCKER_PASSWORD"},
+									},
+								},
+								Action: func(c *cli.Context) error {
+									ctx, dag, err := initializeDagger(c.Context)
 									if err != nil {
-										result = multierror.Append(result, err)
-									} else {
-										fmt.Println("Published image: ", addr)
+										return cli.Exit(err, 1)
 									}
-								}
 
-								if err := result.ErrorOrNil(); err != nil {
-									return cli.Exit(err, 1)
-								}
-							}
+									c.Context = ctx
 
-							return nil
+									repository := c.String("repository")
+									tags := c.StringSlice("tags")
+									password := flags.StringAsSecret(c, dag, "password")
+									username := c.String("username")
+									publish := c.Bool("publish")
+
+									repositoryUrl, err := url.Parse(repository)
+									if err != nil {
+										slog.Error("Could not parse docker repository", "dockerRepository", repository, "error", err)
+										return cli.Exit(err, 1)
+									}
+
+									outFile := fmt.Sprintf(".deployer/artifacts/images/%s.tar", repository)
+
+									if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
+										slog.Error("Could not create directory", "outFile", outFile, "error", err)
+										return cli.Exit(err, 1)
+									}
+
+									project := dag.Host().Directory(".")
+
+									image := project.
+										DockerBuild().
+										WithRegistryAuth(repositoryUrl.Host, username, password).
+										WithLabel("org.opencontainers.image.created", time.Now().Format(time.RFC3339))
+
+									_, err = image.Export(c.Context, outFile)
+									if err != nil {
+										return cli.Exit(err, 1)
+									}
+
+									fmt.Printf("Built image: %s\n", outFile)
+
+									if publish {
+										var result *multierror.Error
+
+										imageWithAuth := image.WithRegistryAuth(repositoryUrl.Host, username, password)
+
+										for _, tag := range tags {
+											addr, err := imageWithAuth.Publish(ctx, fmt.Sprintf(
+												"%s:%s",
+												repository,
+												tag,
+											), dagger.ContainerPublishOpts{
+												MediaTypes: dagger.Dockermediatypes,
+											})
+											if err != nil {
+												result = multierror.Append(result, err)
+											} else {
+												fmt.Println("Published image: ", addr)
+											}
+										}
+
+										if err := result.ErrorOrNil(); err != nil {
+											return cli.Exit(err, 1)
+										}
+									}
+
+									return nil
+								},
+							},
 						},
 					},
 				},
