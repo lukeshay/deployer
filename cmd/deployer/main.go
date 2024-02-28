@@ -117,6 +117,10 @@ func main() {
 										Usage: "labels to apply to the image in the form of key=value",
 										Value: &cli.StringSlice{},
 									},
+									&cli.StringFlag{
+										Name:  "pull",
+										Usage: "pull an image to build from",
+									},
 								},
 								Action: func(c *cli.Context) error {
 									ctx, dag, err := initializeDagger(c.Context)
@@ -132,6 +136,7 @@ func main() {
 									username := c.String("username")
 									publish := c.Bool("publish")
 									labels := c.StringSlice("labels")
+									pull := c.String("pull")
 
 									repositoryUrl, err := url.Parse(repository)
 									if err != nil {
@@ -144,6 +149,13 @@ func main() {
 									if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 										slog.Error("Could not create directory", "outFile", outFile, "error", err)
 										return cli.Exit(err, 1)
+									}
+
+									if pull != "" {
+										dag.
+											Container().
+											WithRegistryAuth(repositoryUrl.Host, username, password).
+											From(pull)
 									}
 
 									project := dag.Host().Directory(".")
