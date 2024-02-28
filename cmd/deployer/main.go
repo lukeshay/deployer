@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"dagger.io/dagger"
@@ -111,6 +112,11 @@ func main() {
 										Usage:   "the password to authenticate with Docker",
 										EnvVars: []string{"DEPLOYER_DOCKER_PASSWORD"},
 									},
+									&cli.StringSliceFlag{
+										Name:  "labels",
+										Usage: "labels to apply to the image in the form of key=value",
+										Value: &cli.StringSlice{},
+									},
 								},
 								Action: func(c *cli.Context) error {
 									ctx, dag, err := initializeDagger(c.Context)
@@ -125,6 +131,7 @@ func main() {
 									password := flags.StringAsSecret(c, dag, "password")
 									username := c.String("username")
 									publish := c.Bool("publish")
+									labels := c.StringSlice("labels")
 
 									repositoryUrl, err := url.Parse(repository)
 									if err != nil {
@@ -145,6 +152,16 @@ func main() {
 										DockerBuild().
 										WithRegistryAuth(repositoryUrl.Host, username, password).
 										WithLabel("org.opencontainers.image.created", time.Now().Format(time.RFC3339))
+
+									for _, label := range labels {
+										parts := strings.SplitN(label, "=", 2)
+
+										if len(parts) != 2 {
+											slog.Error("Invalid label", "label", label)
+										} else {
+											image = image.WithLabel(parts[0], parts[1])
+										}
+									}
 
 									_, err = image.Export(c.Context, outFile)
 									if err != nil {
