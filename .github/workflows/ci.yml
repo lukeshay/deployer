@@ -35,5 +35,7 @@ jobs:
           distribution: goreleaser
           version: latest
           args: release --clean --snapshot
+        env:
+          COSIGN_PWD: ${{ secrets.COSIGN_PWD }}
       - name: Run version command
         run: ./dist/gocden_linux_amd64_v1/gocden --verbose version
