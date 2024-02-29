@@ -79,7 +79,7 @@ func main() {
 				Name:        "version",
 				Description: "Prints the version",
 				Action: func(cli *cli.Context) error {
-					fmt.Printf("gocden.%s\n", version)
+					fmt.Printf("deployer.%s\n", version)
 					return nil
 				},
 			},
