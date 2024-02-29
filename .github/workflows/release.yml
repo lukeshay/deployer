@@ -1,0 +1,45 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency: ${{ github.workflow }}
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-22.04
+    environment:
+      name: Release
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      pages: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - run: git fetch --force --tags
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ">=1.22.0"
+      - name: Configure GPG Key
+        run: |
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --import
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+      - name: Go Mod
+        run: go mod download
+      - name: Install node_modules
+        run: cd pkg/assets && bun install && bun run build
+      - uses: goreleaser/goreleaser-action@v4
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEPLOYER_GITHUB_TOKEN }}
