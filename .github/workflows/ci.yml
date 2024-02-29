@@ -30,8 +30,6 @@ jobs:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
       - name: Go Mod
         run: go mod download
-      - name: Install node_modules
-        run: cd pkg/assets && bun install && bun run build
       - uses: goreleaser/goreleaser-action@v4
         with:
           distribution: goreleaser
