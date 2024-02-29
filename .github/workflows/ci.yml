@@ -23,13 +23,8 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           go-version: ">=1.22.0"
-      - name: Configure GPG Key
-        run: |
-          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --import
-        env:
-          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-      - name: Go Mod
-        run: go mod download
+      - uses: sigstore/cosign-installer@v3.3.0
+      - run: go mod download
       - uses: goreleaser/goreleaser-action@v4
         with:
           distribution: goreleaser
