@@ -3,19 +3,18 @@ set -eou pipefail
 
 RELEASES_URL="https://github.com/lukeshay/deployer/releases"
 FILE_BASENAME="deployer"
+LATEST="$(curl -fsSL 'https://api.github.com/repos/lukeshay/deployer/tags' | jq -r '.[0].name')"
 
-test -z "${VERSION-}" && VERSION="$(curl -fsSL 'https://api.github.com/repos/lukeshay/deployer/tags' | jq -r '.[0].name')"
-
-TMP_DIR="$(mktemp -d)"
-# shellcheck disable=SC2064 # intentionally expands here
-trap "rm -rf \"$TMP_DIR\"" EXIT INT TERM
+test -z "${INSTALL_DIR-}" && INSTALL_DIR="./deployer"
+test -z "${VERSION-}" && VERSION="$LATEST"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 TAR_FILE="$(echo -n "${FILE_BASENAME}_${OS}_${ARCH}.tar.gz" | tr '[:upper:]' '[:lower:]')"
 
 (
-	cd "$TMP_DIR"
+	mkdir -p "$INSTALL_DIR"
+	cd "$INSTALL_DIR"
 	echo "Downloading Deployer $VERSION..."
 	curl -sfLO "$RELEASES_URL/download/$VERSION/$TAR_FILE"
 	curl -sfLO "$RELEASES_URL/download/$VERSION/checksums.txt"
@@ -34,5 +33,6 @@ TAR_FILE="$(echo -n "${FILE_BASENAME}_${OS}_${ARCH}.tar.gz" | tr '[:upper:]' '[:
 	fi
 )
 
-tar -xf "$TMP_DIR/$TAR_FILE" -C "$TMP_DIR"
-"$TMP_DIR/deployer" "$@"
+tar -xf "$INSTALL_DIR/$TAR_FILE" -C "$INSTALL_DIR"
+
+echo "Ready to run $INSTALL_DIR/deployer"
