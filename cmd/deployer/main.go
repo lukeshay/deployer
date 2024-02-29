@@ -76,6 +76,14 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			{
+				Name:        "version",
+				Description: "Prints the version",
+				Action: func(cli *cli.Context) error {
+					fmt.Printf("gocden.%s\n", version)
+					return nil
+				},
+			},
+			{
 				Name:  "dagger",
 				Usage: "run commands in dagger",
 				Subcommands: []*cli.Command{
