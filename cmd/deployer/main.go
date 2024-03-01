@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -14,8 +13,9 @@ import (
 
 	"dagger.io/dagger"
 	"github.com/hashicorp/go-multierror"
-	"github.com/lukeshay/deployer/pkg/flags"
+	"github.com/lukeshay/deployer/pkg/image"
 	"github.com/lukeshay/deployer/pkg/sysexit"
+	"github.com/sean-/sysexits"
 	"github.com/urfave/cli/v2"
 )
 
@@ -86,6 +86,31 @@ func main() {
 			{
 				Name:  "dagger",
 				Usage: "run commands in dagger",
+				Before: func(c *cli.Context) error {
+					ctx, _, err := initializeDagger(c.Context)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Could not initialize dagger: %v\n", err)
+						return err
+					}
+
+					c.Context = ctx
+
+					return nil
+				},
+				After: func(c *cli.Context) error {
+					dag, err := getDaggerFromContext(c.Context)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Could not get dagger from context: %v\n", err)
+						return err
+					}
+
+					if err := dag.Close(); err != nil {
+						fmt.Fprintf(os.Stderr, "Could not close dagger: %v\n", err)
+						return err
+					}
+
+					return nil
+				},
 				Subcommands: []*cli.Command{
 					{
 						Name:  "docker",
@@ -96,8 +121,13 @@ func main() {
 								Usage: "build a Docker image",
 								Flags: []cli.Flag{
 									&cli.StringFlag{
-										Name:     "repository",
-										Usage:    "the repository to push the image to",
+										Name:     "name",
+										Usage:    "the name of the image including the registry",
+										Required: true,
+									},
+									&cli.StringFlag{
+										Name:     "identifier",
+										Usage:    "a unique identifier for the image",
 										Required: true,
 									},
 									&cli.StringSliceFlag{
@@ -110,16 +140,6 @@ func main() {
 										Usage: "whether to publish the image",
 										Value: false,
 									},
-									&cli.StringFlag{
-										Name:    "username",
-										Usage:   "the username to authenticate with Docker",
-										EnvVars: []string{"DEPLOYER_DOCKER_USERNAME"},
-									},
-									&cli.StringFlag{
-										Name:    "password",
-										Usage:   "the password to authenticate with Docker",
-										EnvVars: []string{"DEPLOYER_DOCKER_PASSWORD"},
-									},
 									&cli.StringSliceFlag{
 										Name:  "labels",
 										Usage: "labels to apply to the image in the form of key=value",
@@ -131,47 +151,56 @@ func main() {
 									},
 								},
 								Action: func(c *cli.Context) error {
-									ctx, dag, err := initializeDagger(c.Context)
+									dag, err := getDaggerFromContext(c.Context)
 									if err != nil {
-										return cli.Exit(err, 1)
+										slog.Error("Dagger engine not in context")
+										return cli.Exit(errorMessage(err, "Could not get Dagger engine"), sysexits.Software)
 									}
 
 									c.Context = ctx
 
-									repository := c.String("repository")
+									name := c.String("name")
 									tags := c.StringSlice("tags")
-									password := flags.StringAsSecret(c, dag, "password")
-									username := c.String("username")
 									publish := c.Bool("publish")
 									labels := c.StringSlice("labels")
 									pull := c.String("pull")
+									identifier := c.String("identifier")
 
-									repositoryUrl, err := url.Parse(fmt.Sprintf("https://%s", repository))
-									if err != nil {
-										slog.Error("Could not parse docker repository", "dockerRepository", repository, "error", err)
-										return cli.Exit(err, 1)
-									}
+									tags = append(tags, identifier)
 
-									outFile := fmt.Sprintf(".deployer/artifacts/images/%s:%s.tar", repository, strings.Join(tags, ","))
+									img := image.NewImage(image.ImageOptions{
+										Name:      name,
+										UniqueTag: identifier,
+										Tags:      tags,
+									})
+									authorizer := image.NewAuthorizer(name)
+									outFile := fmt.Sprintf(".deployer/artifacts/images/%s.tar", img.Name())
 
 									if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 										slog.Error("Could not create directory", "outFile", outFile, "error", err)
-										return cli.Exit(err, 1)
+										return cli.Exit(errorMessage(err, "Could not create directory"), sysexits.NoPerm)
 									}
 
 									if pull != "" {
+										pullAuthorizer := image.NewAuthorizer(pull)
+
+										creds, err := pullAuthorizer.Authorize()
+										if err != nil {
+											slog.Error("Could not authorize pull", "error", err)
+											return cli.Exit(errorMessage(err, "Could not authorize pull"), sysexits.Software)
+										}
+
 										dag.
 											Container().
-											WithRegistryAuth(repositoryUrl.Host, username, password).
+											WithRegistryAuth(creds.ServerAddress, creds.Username, dag.SetSecret(creds.ServerAddress, creds.Password)).
 											From(pull).
 											Export(c.Context, fmt.Sprintf(".deployer/artifacts/images/%s.tar", pull))
 									}
 
 									project := dag.Host().Directory(".")
 
-									image := project.
+									dockerImage := project.
 										DockerBuild().
-										WithRegistryAuth(repositoryUrl.Host, username, password).
 										WithLabel("org.opencontainers.image.created", time.Now().Format(time.RFC3339))
 
 									for _, label := range labels {
@@ -180,11 +209,11 @@ func main() {
 										if len(parts) != 2 {
 											slog.Error("Invalid label", "label", label)
 										} else {
-											image = image.WithLabel(parts[0], parts[1])
+											dockerImage = dockerImage.WithLabel(parts[0], parts[1])
 										}
 									}
 
-									_, err = image.Export(c.Context, outFile)
+									_, err = dockerImage.Export(c.Context, outFile)
 									if err != nil {
 										return cli.Exit(err, 1)
 									}
@@ -193,15 +222,16 @@ func main() {
 
 									if publish {
 										var result *multierror.Error
+										creds, err := authorizer.Authorize()
+										if err != nil {
+											slog.Error("Could not authorize pull", "error", err)
+											return cli.Exit(errorMessage(err, "Could not authorize pull"), sysexits.Software)
+										}
 
-										imageWithAuth := image.WithRegistryAuth(repositoryUrl.Host, username, password)
+										imageWithAuth := dockerImage.WithRegistryAuth(creds.ServerAddress, creds.Username, dag.SetSecret(creds.ServerAddress, creds.Password))
 
-										for _, tag := range tags {
-											addr, err := imageWithAuth.Publish(ctx, fmt.Sprintf(
-												"%s:%s",
-												repository,
-												tag,
-											), dagger.ContainerPublishOpts{
+										for _, name := range img.Names() {
+											addr, err := imageWithAuth.Publish(ctx, name, dagger.ContainerPublishOpts{
 												MediaTypes: dagger.Dockermediatypes,
 											})
 											if err != nil {
@@ -237,8 +267,8 @@ var dagCtxKey = "dag"
 
 func initializeDagger(ctx context.Context) (context.Context, *dagger.Client, error) {
 	var dag *dagger.Client
-	dag, ok := ctx.Value(dagCtxKey).(*dagger.Client)
-	if !ok {
+	dag, err := getDaggerFromContext(ctx)
+	if err != nil {
 		var err error
 		dag, err = dagger.Connect(ctx, dagger.WithLogOutput(daggerLogFile))
 		if err != nil {
@@ -246,10 +276,17 @@ func initializeDagger(ctx context.Context) (context.Context, *dagger.Client, err
 		}
 
 		ctx = context.WithValue(ctx, dagCtxKey, dag)
-		defer dag.Close()
 	}
 
 	return ctx, dag, nil
+}
+
+func getDaggerFromContext(ctx context.Context) (*dagger.Client, error) {
+	dag, ok := ctx.Value(dagCtxKey).(*dagger.Client)
+	if !ok {
+		return nil, fmt.Errorf("dagger not found in context")
+	}
+	return dag, nil
 }
 
 func createLogFile(name string) *os.File {
@@ -266,4 +303,8 @@ func createLogFile(name string) *os.File {
 	}
 
 	return logFile
+}
+
+func errorMessage(err error, message string) string {
+	return fmt.Sprintf("%s: %v", message, err)
 }
