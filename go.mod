@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	dagger.io/dagger v0.9.11
-	github.com/docker/docker v25.0.3+incompatible
+	github.com/docker/docker v25.0.5+incompatible
 	github.com/google/go-containerregistry v0.19.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/sean-/sysexits v1.0.0
